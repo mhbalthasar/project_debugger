@@ -276,6 +276,9 @@ internal sealed class VstBridgeClient : IDisposable, IBridgeChannel
 
         // ── 4. 连上管道。桥最多等我们 30 秒，反过来也一样：
         //    连不上就把刚起的进程杀掉，别留一个没人要的桥。
+        // [debug-harness finding 5] 缓冲只能在**服务端**设定（客户端的构造重载没有缓冲区参数，
+        // 写方向用的是服务端的 inbound buffer）。所以真正的修在桥那一侧：DebugBridge/Program.cs
+        // 里 NamedPipeServerStream 显式要了 64KB。
         mPipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
 
         try
@@ -651,6 +654,15 @@ internal sealed class VstBridgeClient : IDisposable, IBridgeChannel
             KillBridge();
         });
 
+    // [debug-harness] 现场诊断：TL_TRACE_AUDIO=1 时把音频路径的每一步打到 stderr。
+    static readonly bool sTraceAudio = Environment.GetEnvironmentVariable("TL_TRACE_AUDIO") == "1";
+
+    static void AudioTrace(string step)
+    {
+        if (sTraceAudio)
+            Console.Error.WriteLine($"[audio] {DateTime.Now:HH:mm:ss.fff} {step}");
+    }
+
     // 音频路径。**不走 await**：它从音频线程调，那里不能等 Task。
     // 数据走共享内存（见 BridgeSharedMemory）：这一侧负责"写输入环、通知桥、等输出环"。
     //
@@ -673,10 +685,12 @@ internal sealed class VstBridgeClient : IDisposable, IBridgeChannel
 
         try
         {
+            AudioTrace("publish");
             // 1) 把输入推进宿主→桥的环，然后通知桥"有一块等你"。
             if (!mInput.TryPublish(slot, inPlanes, channels, frames, BlockWaitMs))
                 return FailAudioBlock();
 
+            AudioTrace("write");
             if (!SendControlBlocking(JsonSerializer.Serialize(new ProcessRequest
                 {
                     Slot = slot,
@@ -688,11 +702,13 @@ internal sealed class VstBridgeClient : IDisposable, IBridgeChannel
                 return FailAudioBlock();
             }
 
-            // 2) 等桥的结果。桥处理完会把结果推进桥→宿主的环，然后回一个短回执。
-            string? reply = ReadControlBlocking();
-            if (reply == null)
-                return FailAudioBlock();
+            AudioTrace("wait-output");
 
+            // 2) 等桥的结果。桥把结果推进桥→宿主的环；**这一侧只等共享环（有 20ms 上限）**。
+            //
+            // [debug-harness finding 5] 这里原来还要读一条控制管道的回执，而那次读没有超时：
+            // 桥的主循环卡在插件的 process 里时，回执永远不来，于是音频线程被无限期阻塞。
+            // 现在桥不再为 ProcessRequest 回执，音频路径上不再有任何"等管道"的动作。
             if (!mOutput.TryRead(BlockWaitMs, out _, out var planes, out int outChannels, out int outFrames))
                 return FailAudioBlock();
 

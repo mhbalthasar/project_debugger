@@ -6,6 +6,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- 真 VST3 那条路（桥侧的 Vst3PluginHost / Vst3Backend / Vst3Insert + vendored OwnVST3
+         包装层）也是从正式工程逐字复制的，单独放一个目录好对照。见 README 的表格。 -->
+    <Compile Include="..\RealVst3\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- VstBridgeClient / BridgeSession / BridgeResidue 在正式工程里都是 internal。 -->
     <InternalsVisibleTo Include="BridgeHarness.Tests" />
     <InternalsVisibleTo Include="HostRunner" />

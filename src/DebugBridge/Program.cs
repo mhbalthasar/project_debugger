@@ -63,8 +63,13 @@ internal static class BridgeProgram
 
         try
         {
+            // [debug-harness finding 5] 显式给两个方向各 64KB 缓冲。
+            // 默认（0）在 Windows 上实际是"同步管道"：写进去的每一帧都要等桥**读走**才返回。
+            // 桥卡在插件的 process 里时就不再读管道 —— 于是宿主的音频线程卡在 Write 上
+            // （真 VST3 卡死的实测现象）。有 64KB 缓冲 + 宿主的判死阈值（连续 50 块放弃），
+            // 音频路径上那点小消息根本填不满，写永远不会等桥。
             using var server = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1,
-                PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+                PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 64 * 1024, 64 * 1024);
 
             // 等宿主来连。给一个上限：宿主启动我们之后应该在几百毫秒内连上；
             // 连不上说明启动路径出了问题，别在这挂成僵尸进程。

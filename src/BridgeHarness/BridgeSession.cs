@@ -15,11 +15,21 @@ internal sealed class BridgeSession : IDisposable
 {
     readonly NamedPipeServerStream mPipe;
 
-    // [debug-harness] 原实现是 PluginHost / Vst3PluginHost（真 native）。这里换成
-    // 纯托管的 FakePluginHost：协议、帧读写、槽位路由、音频环全部保持原样，
-    // 只把"插件"抽掉 —— 要验证的是隔离机制，不是 VST。
+    // [debug-harness] 原实现是 PluginHost / Vst3PluginHost（真 native）。这里有两套：
+    //   · FakePluginHost —— 纯托管的"假插件"，路径当指令（gain / hang / crash / child）。
+    //   · RealVst3PluginHost —— 逐字复制的正式 VST3 宿主（真的 ownvst3 native、真的 .vst3）。
+    // 路由规则见 IsRealVst3：**路径以 .vst3 结尾**的走真宿主，其余仍旧假插件。
+    // 于是在同一座桥上，既能验隔离机制（假插件，可控地卡死 / 崩溃），
+    // 又能验真 VST3 的加载 / 处理 / 状态 / 参数（真插件）。
     readonly FakePluginHost mVst2 = new();
-    readonly FakePluginHost mVst3 = new();
+    readonly IBridgePluginHost mVst3Fake = new FakePluginHost();
+    readonly RealVst3PluginHost? mVst3Real =
+        RealVst3PluginHost.IsSupported ? new RealVst3PluginHost() : null;
+
+    static bool IsRealVst3(LoadPluginMessage message)
+        => string.Equals(message.Format, PluginFormats.Vst3, StringComparison.OrdinalIgnoreCase)
+           && message.Path != null
+           && message.Path.EndsWith(".vst3", StringComparison.OrdinalIgnoreCase);
 
     // 槽位 → 宿主实现。Load 时按 format 决定，之后的每一条消息都照它转发。
     // 只在桥的主线程读写，不需要锁。
@@ -39,7 +49,8 @@ internal sealed class BridgeSession : IDisposable
         if (input != null && output != null)
         {
             mVst2.Attach(input, output);
-            mVst3.Attach(input, output);
+            mVst3Fake.Attach(input, output);
+            mVst3Real?.Attach(input, output);
         }
     }
 
@@ -152,9 +163,11 @@ internal sealed class BridgeSession : IDisposable
         if (mOwner.Remove(message.Slot, out var previous))
             previous.Unload(message.Slot);
 
-        IBridgePluginHost host = string.Equals(message.Format, PluginFormats.Vst3, StringComparison.OrdinalIgnoreCase)
-            ? mVst3
-            : mVst2;
+        IBridgePluginHost host = IsRealVst3(message) && mVst3Real != null
+            ? mVst3Real
+            : string.Equals(message.Format, PluginFormats.Vst3, StringComparison.OrdinalIgnoreCase)
+                ? mVst3Fake
+                : mVst2;
 
         // 附带音频段在这个消息里用不到（加载不需要音频），忽略 payload。
         var result = host.Load(message, out int inputChannels, out int outputChannels);
@@ -246,16 +259,14 @@ internal sealed class BridgeSession : IDisposable
 
         // 音频数据走共享内存（见 BridgeSharedMemory 的说明）：
         // 这里 payload 只是"宿主要求处理一块"的指令，真正的样本在共享环里。
-        bool processed = OwnerOf(message.Slot).Process(message.Slot, message.Bypass, out int frames, out int channels);
-
-        Write(JsonSerializer.Serialize(new ProcessResult
-        {
-            Slot = message.Slot,
-            Ok = true,
-            Processed = processed,
-            Frames = frames,
-            Channels = channels,
-        }));
+        //
+        // [debug-harness finding 5] ProcessRequest **不回执**。
+        //
+        // 原实现处理完写一条 ProcessResult，而宿主在**音频线程**上同步读它 —— 那次读没有超时。
+        // 插件在 process 里卡死时，桥的主循环卡在 PluginHost.Process 里，永远不会有回执，
+        // 于是宿主的音频线程跟着无限期阻塞（实测：真 VST3 卡死 → 整个宿主死锁，只能杀进程）。
+        // 处理结果本来就在共享环里：宿主等输出环（20ms 上限）就够了，这条回执是多余的。
+        OwnerOf(message.Slot).Process(message.Slot, message.Bypass, out _, out _);
     }
 
     void HandleGetState(string? json)

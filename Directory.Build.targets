@@ -18,4 +18,17 @@
     <BridgeRidAlt Condition="'$(BridgeRid)' == 'osx-arm64'">osx-x64</BridgeRidAlt>
   </PropertyGroup>
 
+  <!-- 真 VST3 的原生库（ownvst3.tlhost.*）。
+       验证台不把 60MB 的二进制塞进仓库：CI 和开发机都用 Vst3NativeRoot 指过去
+       （CI 从 NuGet 的 OwnAudioVst 包里解出来，开发机可以直接指向 TuneLab 的 Native/）。
+       目录约定：<Vst3NativeRoot>/<rid>/<原生库文件名>，与 Vst3Backend.NativeRid 一致。
+       没设就没有原生库 —— 真 VST3 那几组测试会跳过，其余照跑。 -->
+  <Target Name="StageVst3Native" AfterTargets="Build"
+          Condition="'$(Vst3NativeRoot)' != '' and Exists('$(Vst3NativeRoot)\$(BridgeRid)')">
+    <ItemGroup>
+      <_Vst3NativeFiles Include="$(Vst3NativeRoot)\$(BridgeRid)\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_Vst3NativeFiles)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
+
 </Project>

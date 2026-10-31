@@ -4,6 +4,13 @@ name: ipc
 #   Windows  —— JobObject（KILL_ON_JOB_CLOSE）
 #   Unix     —— 存活管道 + 看门狗 + 进程组 + 残留清扫
 # 每个平台都跑同一组测试，包括"宿主被 SIGKILL 掉，桥和它拉起的孙进程必须一起没"。
+#
+# 第二阶段（真 VST3）：同一个作业里再摆两样东西，然后跑 RealVst3Tests ——
+#   · 真原生库：从 NuGet 包 OwnAudioVst 里解出**与发布版同一份**的 ownvst3 二进制
+#     （TuneLab 里正是这一份，改名成 .tlhost.*），
+#   · 真插件：tests/plugins/testvst3 用 Steinberg 的 VST3 SDK 现场编出来，
+#     五个变体覆盖"正常 / 崩在 process / 卡在 process / 崩在加载 / 卡在加载"。
+# 于是"真插件在 Linux/macOS 上是不是和 Windows 一样稳"有了逐样本、逐故障的答案。
 
 on:
   push:
@@ -15,7 +22,7 @@ jobs:
   ipc:
     name: ipc (${{ matrix.rid }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    timeout-minutes: 60
     continue-on-error: ${{ matrix.experimental == true }}
     strategy:
       fail-fast: false
@@ -23,19 +30,29 @@ jobs:
         include:
           - os: windows-latest
             rid: win-x64
+            vst3: true
           - os: ubuntu-latest
             rid: linux-x64
+            vst3: true
           - os: macos-latest
             rid: osx-arm64
+            vst3: true
           - os: macos-15-intel
             rid: osx-x64
+            vst3: true
           # 这两个 runner 是 GitHub 的 ARM 托管机（公共仓库可用）。
           # 万一某天不可用，别把整条流水线拖红。
+          #
+          # win-arm64 上跑的是 **x64** 的 testhost（SDK RID 与运行时 RID 不一致，
+          # 见 Directory.Build.targets 里的 BridgeRidAlt），原生库的架构会配错，
+          # 所以这一个作业只验隔离机制、不验真 VST3。
           - os: windows-11-arm
             rid: win-arm64
+            vst3: false
             experimental: true
           - os: ubuntu-24.04-arm
             rid: linux-arm64
+            vst3: true
             experimental: true
 
     steps:
@@ -48,11 +65,66 @@ jobs:
       - name: 环境
         shell: bash
         run: |
-          echo "rid=${{ matrix.rid }}"
+          echo "rid=${{ matrix.rid }} vst3=${{ matrix.vst3 }}"
           dotnet --info | head -n 20
           uname -a || ver
 
-      - name: 跑隔离测试
+      # ── 真 VST3 的准备 ───────────────────────────────────────────────
+
+      - name: 取原生库（与发布版同一份 OwnAudioVst）
+        if: matrix.vst3
+        shell: pwsh
+        run: |
+          $rid = '${{ matrix.rid }}'
+          $zip = Join-Path $env:RUNNER_TEMP 'ownaudiovst.zip'
+          $dir = Join-Path $env:RUNNER_TEMP 'ownaudiovst'
+
+          Invoke-WebRequest -UseBasicParsing `
+            -Uri 'https://api.nuget.org/v3-flatcontainer/ownaudiovst/1.7.0/ownaudiovst.1.7.0.nupkg' `
+            -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $dir -Force
+
+          # 包里的名字 → TuneLab 发布时的名字（.tlhost 后缀，见 Vst3Backend.NativeFileName）
+          $map = @{
+            'ownvst3.dll'       = 'ownvst3.tlhost.dll'
+            'libownvst3.so'     = 'libownvst3.tlhost.so'
+            'libownvst3.dylib'  = 'libownvst3.tlhost.dylib'
+          }
+
+          $src = Join-Path $dir "runtimes/$rid/native"
+          if (-not (Test-Path $src)) { throw "no native for $rid in the package" }
+
+          $root = Join-Path $env:GITHUB_WORKSPACE 'vst3-native'
+          $dst = Join-Path $root $rid
+          New-Item -ItemType Directory -Force -Path $dst | Out-Null
+
+          Get-ChildItem $src -File | ForEach-Object {
+            $name = if ($map.ContainsKey($_.Name)) { $map[$_.Name] } else { $_.Name }
+            Copy-Item $_.FullName (Join-Path $dst $name)
+          }
+
+          Get-ChildItem $dst | ForEach-Object { "native: $($_.Name) $($_.Length)" }
+          "Vst3NativeRoot=$root" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: 编真 VST3 测试包
+        if: matrix.vst3
+        shell: pwsh
+        run: |
+          # 只要接口与公共实现三个子模块，不要 VSTGUI（那会把构建时间翻几倍）。
+          git clone --depth 1 https://github.com/steinbergmedia/vst3sdk.git "$env:RUNNER_TEMP/vst3sdk"
+          git -C "$env:RUNNER_TEMP/vst3sdk" submodule update --init --depth 1 base cmake pluginterfaces public.sdk
+
+          cmake -S tests/plugins/testvst3 -B "$env:RUNNER_TEMP/vst3plugin" `
+            -DCMAKE_BUILD_TYPE=Release -DVST3_SDK="$env:RUNNER_TEMP/vst3sdk"
+          cmake --build "$env:RUNNER_TEMP/vst3plugin" --config Release --parallel
+
+          Get-ChildItem -Recurse -File "$env:RUNNER_TEMP/vst3plugin/bundles" |
+            ForEach-Object { "bundle: $($_.FullName)" }
+          "TL_VST3_BUNDLE_DIR=$env:RUNNER_TEMP/vst3plugin/bundles" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      # ── 测试 ────────────────────────────────────────────────────────
+
+      - name: 跑隔离 + 真 VST3 测试
         run: >
           dotnet test tests/BridgeHarness.Tests/BridgeHarness.Tests.csproj
           -c Release
