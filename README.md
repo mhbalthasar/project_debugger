@@ -130,9 +130,26 @@ arm64 runner 上 `NETCoreSdkPortableRuntimeIdentifier` 是 `win-arm64`，但 `do
 `.github/workflows/native.yml` 在 **AlmaLinux 8（glibc 2.28，与验证机一致）** 里
 编译 `ModernMube/OwnVST3` 的 `libownvst3.so`，然后：
 
-- 用 `objdump` 断言它引用的 GLIBC 符号版本不超过 2.28；
+- 用 `objdump` 断言它引用的 GLIBC 符号版本不超过 2.28（实测上限 **2.17**）；
 - 在同一个容器里 `dlopen` 一次，确认它真的能加载；
+- 断言它导出 TuneLab 的 managed 包装层需要的那 20 个 `VST3Plugin_*` 符号
+  （公开源码 1.5.4 导出 33 个，是 NuGet 1.7.0 native 所用 20 个的超集）；
 - 把 `.so` 作为构建产物上传。
 
 这解决的是「上游 NuGet 里的 linux-x64 native 要求 GLIBC_2.38，Anolis 8.10 只有 2.28」
 那条阻塞。
+
+实测（libr 679 KB）：
+
+```
+max GLIBC symbol version = 2.17      # GLIBCXX 上限 3.4.21
+dlopen ok: 0x3e0442d0
+```
+
+即：**在 Anolis 8.10（glibc 2.28）上可以直接用**，甚至能下探到 glibc 2.17。
+
+已知限制：公开源码是 1.5.4，而当前 vendored 的 native 来自 NuGet 1.7.0；
+两者导出名兼容，但 1.6/1.7 的行为修复未必在 1.5.4 里。要在真机上做端到端，
+建议先用这份 `.so` 顶替 `Native/linux-x64/libownvst3.tlhost.so` 跑一遍加载/处理/状态，
+再决定是否长期维护这条自编译线。
+

@@ -1,7 +1,12 @@
 name: native
 
 # 目标：在 glibc 2.28 的构建环境里编出 ownvst3 的 Linux .so，
-# 并"证明"它真的能在 glibc 2.28 上 dlopen（这是当前 Linux 端到端最大的未知数）。
+# 并"证明"它真的能在 glibc 2.28 上 dlopen、且导出 TuneLab 需要的那 20 个符号
+# （这是当前 Linux 端到端最大的未知数）。
+#
+# 源码用 ModernMube/OwnVST3（公开的 C++ 源码，CMake 工程版本 1.5.4）。
+# NuGet 上 OwnAudioVst 1.7.0 的 native 来自更新的、未公开的源码；但 1.5.4 的
+# 导出是 1.7.0 那 20 个的超集，所以按名字核对即可确认可替换。
 #
 # 为什么是 AlmaLinux 8：它的 glibc 正好是 2.28，与验证机 Anolis 8.10 一致。
 # 在更新的发行版上编出来的 .so 会引用更新的 GLIBC_2.38 符号，拿到 2.28 上直接
@@ -80,6 +85,34 @@ jobs:
           gcc /src/smoke.c -ldl -o /src/smoke
           /src/smoke
           echo "glibc: $(ldd --version | head -n 1)"
+
+      - name: 校验 TuneLab 需要的那 20 个导出
+        run: |
+          set -eu
+          lib=/src/build/libownvst3.so
+          nm -D --defined-only "$lib" | awk '{print $NF}' | sort > /tmp/exports.txt
+
+          # 这份清单来自 TuneLab 的 Vendored/OwnVST3*.cs（_export("...")）。
+          # 上游公开源码是 1.5.4，导出 33 个；NuGet 上的 1.7.0 native 用了其中 20 个。
+          # 名字对得上 = managed 侧的 P/Invoke 不会 EntryPointNotFound。
+          missing=0
+          for name in \
+            VST3Plugin_ClearStringCache VST3Plugin_CloseEditor VST3Plugin_Create \
+            VST3Plugin_CreateEditor VST3Plugin_Destroy VST3Plugin_GetEditorSize \
+            VST3Plugin_GetName VST3Plugin_GetParameter VST3Plugin_GetParameterAt \
+            VST3Plugin_GetParameterCount VST3Plugin_GetPluginInfo VST3Plugin_GetVendor \
+            VST3Plugin_Initialize VST3Plugin_IsEffect VST3Plugin_IsInstrument \
+            VST3Plugin_LoadPlugin VST3Plugin_ProcessAudio VST3Plugin_ProcessMidi \
+            VST3Plugin_ResizeEditor VST3Plugin_SetParameter
+          do
+            if ! grep -qx "$name" /tmp/exports.txt; then
+              echo "::error::missing export: $name"
+              missing=1
+            fi
+          done
+
+          if [ "$missing" -ne 0 ]; then exit 1; fi
+          echo "all 20 exports present"
 
       - name: 上传 .so
         uses: actions/upload-artifact@v4
