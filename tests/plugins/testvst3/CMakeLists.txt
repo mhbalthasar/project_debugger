@@ -106,6 +106,11 @@ foreach(entry IN LISTS variants)
   target_link_libraries(${target} PRIVATE sdk)
 
   if(SMTG_MAC)
+    # 手写 add_library 时只能自己补平台框架（smtg_add_vst3plugin 会替你做这件事）：
+    # VST3 的 base 实现用 CoreFoundation 处理 UTF-16 字符串，不链接就是一片
+    # _CFStringCreateWithFormat / _CFUUIDCreate 未定义符号，链接直接失败。
+    target_link_libraries(${target} PRIVATE "-framework CoreFoundation")
+
     # macOS 的插件是一个 CFBundle：没有 Info.plist 就加载不了。
     file(WRITE "${bundle}/Contents/Info.plist"
 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>

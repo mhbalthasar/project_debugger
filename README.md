@@ -162,6 +162,11 @@ HarnessTests : 13/13 通过
 逐样本断言成立：`Gain = 0.25` 时输出确实是输入的 1/4，state 往返之后又回到 1/4。
 Linux / macOS 的同一组跑在 CI 里（见下）。
 
+## 结果（2026-11-01，第三轮：真 VST3，六平台 CI）
+
+第一轮（`7bf9802`）跑出了发现 6、发现 7 和 macOS 缺框架三件事；修完之后本机 20/20 绿，
+Linux / macOS 的结果见下一轮。
+
 ## 发现
 
 ### 发现 1：控制管道 EOF 之后，客户端仍认为桥活着
@@ -228,6 +233,46 @@ arm64 runner 上 `NETCoreSdkPortableRuntimeIdentifier` 是 `win-arm64`，但 `do
 
 修正之后：卡死的真插件在 50 块（约 1s）内被判死、之后一律直通，杀桥后立刻可重建。
 **两条都应当回灌 TuneLab 本体**。
+
+### 发现 6：Unix 上「管道写抛异常」不被当成桥死了（Windows 上发现不了）
+
+`ARealPluginCrashingInProcessOnlyTakesTheBridgeDown` 在 linux-x64 / linux-arm64 上是红的，
+win-x64 / osx 上是绿的：
+
+> 桥被插件 `abort()` 带走之后，宿主下一次 `LoadBlocking` 应该返回 null **并且**把桥判死。
+> Windows 命名管道的 `IsConnected` 在服务端进程消失后会变 false，所以 `TryLoad*` 开头的
+> `if (!IsRunning)` 就把它挡掉了；而 Unix（UDS 模拟）的 `IsConnected` **一直为真**，
+> 于是一路走到写，拿到 EPIPE → IOException。这个异常本来只被 `TryLoad*` 的 catch 吞掉、
+> 返回 null，不判死 —— 桥明明死了，`IsRunning` 还是真，之后每次加载都失败，
+> 直到重启应用。这正是「发现 1」在 Unix 上的另一条到达路径。
+
+修正：`ExchangeAsync` 里把写/读抛出的异常（`OperationCanceledException` 除外）也当作死亡，
+就地 `KillBridge()` 并返回 null。**应当回灌 TuneLab 本体**。
+
+### 发现 7：两处同时杀桥 → 共享段被 Dispose 两次
+
+`AHungPluginIsTimedOutAndTheBridgeIsKilled` 在 win-arm64 上抛
+`ObjectDisposedException`（`SafeMemoryMappedViewHandle`，栈在
+`SharedAudioRing.Dispose` → `MemoryMappedViewAccessor.Dispose` → `Flush`）：
+
+> 超时那条路是**两个线程**同时杀桥：`BridgeTimeout.Run` 的 `onTimeout`（超时线程），
+> 以及被打断的那条交换任务（管道被 Dispose 之后它读到 EOF，也走 `KillBridge`）。
+> 两边都可能看到非 null 的 `mInput` / `mOutput` 并各 Dispose 一次，第二次撞在已释放的
+> 映射句柄上。arm64 上稳定复现，x64 只是时间窗口更小。
+
+修正：`KillBridge` 串行化（`mKillLock`），`KillBridgeCore` 才是原来的方法体。
+**应当回灌 TuneLab 本体**。
+
+### 顺带：macOS 上手写 `add_library` 少了平台框架
+
+osx-arm64 / osx-x64 的插件编译一开始全红：`_CFStringCreateWithFormat`、`_CFUUIDCreate`
+等一片 `_CF*` 未定义符号。
+
+> `smtg_add_vst3plugin` 会替你把 `-framework CoreFoundation` 接上；本项目为了控制产物位置
+> 用的是手写 `add_library(MODULE)`，于是这一步要自己补。VST3 的 base 实现用 CoreFoundation
+> 处理 UTF-16 字符串，缺了它链接必失败。
+
+修正：`CMakeLists.txt` 里 `if(SMTG_MAC) target_link_libraries(... "-framework CoreFoundation")`。
 
 ## 平台覆盖
 

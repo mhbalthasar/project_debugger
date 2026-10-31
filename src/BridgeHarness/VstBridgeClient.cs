@@ -749,8 +749,21 @@ internal sealed class VstBridgeClient : IDisposable, IBridgeChannel
     /// <summary>桥的音频路是否已停用（连续失败过多）。宿主据此把这一个插入标红。</summary>
     public bool AudioStalled => mAudioStall.Stalled;
 
+    // 两处会同时杀桥：超时线程（BridgeTimeout.Run 的 onTimeout），和被打断的那条交换任务
+    // （管道被 Dispose 之后它读到 EOF / 抛 IOException，也会走 KillBridge）。
+    // 不串行化的话两边都可能看到非 null 的 mInput / mOutput 并各 Dispose 一次 ——
+    // 第二次在 MemoryMappedViewAccessor.Dispose（内部 Flush）里抛 ObjectDisposedException。
+    // win-arm64 上稳定复现；win-x64 只是时间窗口更小、没撞上。
+    readonly object mKillLock = new object();
+
     /// <summary>宿主主动关闭桥（例如关闭混音台窗口）。</summary>
     public void KillBridge()
+    {
+        lock (mKillLock)
+            KillBridgeCore();
+    }
+
+    void KillBridgeCore()
     {
         try
         {
@@ -938,8 +951,28 @@ internal sealed class VstBridgeClient : IDisposable, IBridgeChannel
         await mRoundTrip.WaitAsync(cancellation).ConfigureAwait(false);
         try
         {
-            await SendControlAsync(json, cancellation).ConfigureAwait(false);
-            string? reply = await ReadControlAsync(cancellation).ConfigureAwait(false);
+            string? reply;
+            try
+            {
+                await SendControlAsync(json, cancellation).ConfigureAwait(false);
+                reply = await ReadControlAsync(cancellation).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                // [debug-harness finding 6] 管道自己的写/读抛异常，同样是"桥死了"。
+                //
+                // Unix 上这一点是**必需**的：Windows 命名管道的 IsConnected 在服务端进程
+                // 消失后会变 false，所以 TryLoad* 开头的 `if (!IsRunning)` 就直接挡掉了；
+                // 而 Unix（UDS 模拟）的 IsConnected 一直为真，于是一路走到写，拿到 EPIPE →
+                // IOException。原来的代码让这个异常一路飘到 TryLoad* 的 catch，只返回 null、
+                // 不判死 —— 桥明明死了，IsRunning 还为真，之后每次加载都失败。
+                KillBridge();
+                return null;
+            }
 
             // [debug-harness finding] 回执为空 = 控制管道 EOF（桥被插件搞死 / 被 SIGKILL）。
             // 正式代码在这里只是返回 null，mPipe 仍然"连着呢"：IsRunning 继续为真，
