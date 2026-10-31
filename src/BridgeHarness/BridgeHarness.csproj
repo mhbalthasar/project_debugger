@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>TuneLab.ExperimentalPatch</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- VstBridgeClient / BridgeSession / BridgeResidue 在正式工程里都是 internal。 -->
+    <InternalsVisibleTo Include="BridgeHarness.Tests" />
+    <InternalsVisibleTo Include="HostRunner" />
+    <InternalsVisibleTo Include="TuneLab.ExperimentalPatch.VstBridge.x64" />
+  </ItemGroup>
+
+</Project>

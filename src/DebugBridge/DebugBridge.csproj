@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- 名字必须和 VstBridgeClient.BridgeAssemblyName64 一致：
+         宿主按 AppContext.BaseDirectory/bridge/<rid>/<name> 找桥。 -->
+    <AssemblyName>TuneLab.ExperimentalPatch.VstBridge.x64</AssemblyName>
+    <RootNamespace>DebugBridge</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BridgeHarness\BridgeHarness.csproj" />
+  </ItemGroup>
+
+</Project>

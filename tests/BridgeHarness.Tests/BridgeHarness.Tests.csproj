@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BridgeHarness\BridgeHarness.csproj" />
+    <ProjectReference Include="..\..\src\DebugBridge\DebugBridge.csproj" ReferenceOutputAssembly="false" Private="false" />
+    <ProjectReference Include="..\..\src\HostRunner\HostRunner.csproj" ReferenceOutputAssembly="false" Private="false" />
+  </ItemGroup>
+
+  <!-- 把桥与宿主跑程序摆到测试输出目录里，位置�?VstBridgeClient.FindBridgeExecutable 约定一致�?-->
+  <Target Name="StageBridgeAndHost" AfterTargets="Build">
+    <ItemGroup>
+      <_BridgeFiles Include="$(MSBuildProjectDirectory)\..\..\src\DebugBridge\bin\$(Configuration)\net8.0\**\*" />
+      <_HostFiles Include="$(MSBuildProjectDirectory)\..\..\src\HostRunner\bin\$(Configuration)\net8.0\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_BridgeFiles)"
+          DestinationFolder="$(OutDir)bridge\$(BridgeRid)\%(RecursiveDir)"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_HostFiles)"
+          DestinationFolder="$(OutDir)tools\hostrunner\%(RecursiveDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

@@ -1,0 +1,68 @@
+name: ipc
+
+# 把 TuneLab 里"宿主 ↔ 桥"的进程间机制原样抽出来，在真实操作系统上跑真进程：
+#   Windows  —— JobObject（KILL_ON_JOB_CLOSE）
+#   Unix     —— 存活管道 + 看门狗 + 进程组 + 残留清扫
+# 每个平台都跑同一组测试，包括"宿主被 SIGKILL 掉，桥和它拉起的孙进程必须一起没"。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  ipc:
+    name: ipc (${{ matrix.rid }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    continue-on-error: ${{ matrix.experimental == true }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: macos-latest
+            rid: osx-arm64
+          - os: macos-15-intel
+            rid: osx-x64
+          # 这两个 runner 是 GitHub 的 ARM 托管机（公共仓库可用）。
+          # 万一某天不可用，别把整条流水线拖红。
+          - os: windows-11-arm
+            rid: win-arm64
+            experimental: true
+          - os: ubuntu-24.04-arm
+            rid: linux-arm64
+            experimental: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: 环境
+        shell: bash
+        run: |
+          echo "rid=${{ matrix.rid }}"
+          dotnet --info | head -n 20
+          uname -a || ver
+
+      - name: 跑隔离测试
+        run: >
+          dotnet test tests/BridgeHarness.Tests/BridgeHarness.Tests.csproj
+          -c Release
+          --logger "console;verbosity=normal"
+          --logger "trx;LogFileName=ipc-${{ matrix.rid }}.trx"
+
+      - name: 上传测试结果
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipc-${{ matrix.rid }}
+          path: '**/TestResults/*.trx'
+          if-no-files-found: ignore

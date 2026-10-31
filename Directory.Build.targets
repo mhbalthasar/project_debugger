@@ -1,0 +1,9 @@
+<Project>
+
+  <!-- 必须放在 targets 里：NETCoreSdkPortableRuntimeIdentifier 是 SDK 的属性，
+       在 Directory.Build.props 求值时还不存在（那里拿到的是空串）。 -->
+  <PropertyGroup>
+    <BridgeRid Condition="'$(BridgeRid)' == ''">$(NETCoreSdkPortableRuntimeIdentifier)</BridgeRid>
+  </PropertyGroup>
+
+</Project>
