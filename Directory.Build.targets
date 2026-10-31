@@ -4,6 +4,18 @@
        在 Directory.Build.props 求值时还不存在（那里拿到的是空串）。 -->
   <PropertyGroup>
     <BridgeRid Condition="'$(BridgeRid)' == ''">$(NETCoreSdkPortableRuntimeIdentifier)</BridgeRid>
+
+    <!-- 为什么还要一个 Alt：在 win-arm64 runner 上，SDK 是 arm64（BridgeRid=win-arm64），
+         但 dotnet test 的 testhost 是 x64，于是运行时里的
+         VstBridgeClient.BridgeRid 算出 win-x64 —— 两边对不上。
+         这不是产品问题（正式发布是一个 RID 出一整套）；验证台把桥同时摆到
+         同一 OS 的两个架构目录下就够了，反正桥本身跨架构也能被 exec。 -->
+    <BridgeRidAlt Condition="'$(BridgeRid)' == 'win-x64'">win-arm64</BridgeRidAlt>
+    <BridgeRidAlt Condition="'$(BridgeRid)' == 'win-arm64'">win-x64</BridgeRidAlt>
+    <BridgeRidAlt Condition="'$(BridgeRid)' == 'linux-x64'">linux-arm64</BridgeRidAlt>
+    <BridgeRidAlt Condition="'$(BridgeRid)' == 'linux-arm64'">linux-x64</BridgeRidAlt>
+    <BridgeRidAlt Condition="'$(BridgeRid)' == 'osx-x64'">osx-arm64</BridgeRidAlt>
+    <BridgeRidAlt Condition="'$(BridgeRid)' == 'osx-arm64'">osx-x64</BridgeRidAlt>
   </PropertyGroup>
 
 </Project>

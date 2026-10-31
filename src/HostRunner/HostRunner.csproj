@@ -11,13 +11,17 @@
     <ProjectReference Include="..\DebugBridge\DebugBridge.csproj" ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>
 
-  <!-- 桥要和这个宿�?exe 放在同一个布局里：<base>/bridge/<rid>/<bridge>�?       用独立的宿主进程才能"把宿�?SIGKILL �?验证桥跟着走�?-->
+  <!-- 桥要和这个宿�?exe 放在同一个布局里：<base>/bridge/<rid>/<bridge>�?       用独立的宿主进程才能"把宿�?SIGKILL �?验证桥跟着走�?-->
   <Target Name="StageBridge" AfterTargets="Build">
     <ItemGroup>
       <_BridgeFiles Include="$(MSBuildProjectDirectory)\..\DebugBridge\bin\$(Configuration)\net8.0\**\*" />
     </ItemGroup>
     <Copy SourceFiles="@(_BridgeFiles)"
           DestinationFolder="$(OutDir)bridge\$(BridgeRid)\%(RecursiveDir)"
+          SkipUnchangedFiles="true" />
+    <Copy Condition="'$(BridgeRidAlt)' != ''"
+          SourceFiles="@(_BridgeFiles)"
+          DestinationFolder="$(OutDir)bridge\$(BridgeRidAlt)\%(RecursiveDir)"
           SkipUnchangedFiles="true" />
   </Target>
 

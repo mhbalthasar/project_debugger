@@ -17,7 +17,7 @@
     <ProjectReference Include="..\..\src\HostRunner\HostRunner.csproj" ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>
 
-  <!-- 把桥与宿主跑程序摆到测试输出目录里，位置�?VstBridgeClient.FindBridgeExecutable 约定一致�?-->
+  <!-- 把桥与宿主跑程序摆到测试输出目录里，位置�?VstBridgeClient.FindBridgeExecutable 约定一致�?-->
   <Target Name="StageBridgeAndHost" AfterTargets="Build">
     <ItemGroup>
       <_BridgeFiles Include="$(MSBuildProjectDirectory)\..\..\src\DebugBridge\bin\$(Configuration)\net8.0\**\*" />
@@ -25,6 +25,10 @@
     </ItemGroup>
     <Copy SourceFiles="@(_BridgeFiles)"
           DestinationFolder="$(OutDir)bridge\$(BridgeRid)\%(RecursiveDir)"
+          SkipUnchangedFiles="true" />
+    <Copy Condition="'$(BridgeRidAlt)' != ''"
+          SourceFiles="@(_BridgeFiles)"
+          DestinationFolder="$(OutDir)bridge\$(BridgeRidAlt)\%(RecursiveDir)"
           SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(_HostFiles)"
           DestinationFolder="$(OutDir)tools\hostrunner\%(RecursiveDir)"

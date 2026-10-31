@@ -781,6 +781,20 @@ internal sealed class VstBridgeClient : IDisposable, IBridgeChannel
             }
         }
 
+        // [debug-harness finding] 必须等它真的退出，再放掉共享段。
+        // Windows 上共享段是内核对象，由**两端**的句柄共同持有：桥还活着的那几毫秒里，
+        // 下一次 EnsureStarted 的 MemoryMappedFile.CreateNew 会报
+        // "Cannot create a file when that file already exists."
+        // 表现就是"插件崩过一次之后，这个 VST3 插入再也装不回来"。
+        // 本地单跑常常赢这个竞态，CI 上是稳定复现的。
+        try
+        {
+            mProcess?.WaitForExit(2000);
+        }
+        catch (Exception)
+        {
+        }
+
         mProcess?.Dispose();
         mProcess = null;
 

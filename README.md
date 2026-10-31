@@ -69,20 +69,50 @@ dotnet test tests/BridgeHarness.Tests/BridgeHarness.Tests.csproj -c Release
 测试会自己把 `DebugBridge` 摆到 `bridge/<rid>/`、把 `HostRunner` 摆到 `tools/hostrunner/`，
 位置与 `VstBridgeClient.FindBridgeExecutable` 的约定一致。
 
-## 第一轮结果（2026-10）
+## 结果（2026-10-31，第一轮 CI）
 
-Windows x64：13/13 通过。
+| job | 结果 | 说明 |
+| --- | --- | --- |
+| linux-x64 | ✅ 13/13 | 存活管道 + 看门狗 + 进程组 + 残留清扫，全部真的跑通 |
+| linux-arm64 | ✅ 13/13 | 同上 |
+| osx-arm64 | ✅ 13/13 | **第一次在真 macOS 上验证** |
+| osx-x64 | ✅ 13/13 | 同上 |
+| win-x64 | ❌ → 已修 | 见「发现 2」 |
+| win-arm64 | ❌ → 已修 | 见「发现 3」 |
+| native / glibc 2.28 | ✅ | `.so` 编译成功、`dlopen` 成功、引用的 GLIBC 符号 ≤ 2.28 |
 
-其中 `APluginThatCrashesTheBridgeDoesNotTakeTheHostDown` 一开始是**红**的，
-它暴露了正式代码里的一个真实缺口：
+## 发现
+
+### 发现 1：控制管道 EOF 之后，客户端仍认为桥活着
+
+`APluginThatCrashesTheBridgeDoesNotTakeTheHostDown` 一开始是红的。
 
 > 控制管道读到 EOF 时，`VstBridgeClient` 只是返回 `null`，`mPipe` 仍然是「已连接」。
 > `IsRunning` 继续为真，下一次 `EnsureStarted` 直接 `return true` —— 于是桥已经死了，
 > 之后每一次加载都失败，直到有人显式 `KillBridge`（关混音台 / 重启应用）。
 
-本仓库在 `ExchangeAsync` 里加了一处最小修正（见 `src/BridgeHarness/VstBridgeClient.cs`
-里 `[debug-harness finding]` 注释）：回执为空就地 `KillBridge()`。**这处应当回灌到
-TuneLab 本体**，否则「插件把桥搞崩一次」= 这个 VST3 插入直到重启都装不回来。
+修正（`src/BridgeHarness/VstBridgeClient.cs`，`[debug-harness finding]`）：`ExchangeAsync`
+拿到空回执就地 `KillBridge()`。**应当回灌 TuneLab 本体** —— 否则「插件把桥搞崩一次」
+等于这个 VST3 插入直到重启都装不回来。
+
+### 发现 2：杀桥之后立刻重建共享段，会撞上「文件已存在」
+
+`KillBridgeIsFinalAndRestartWorks` 在 CI 的 win-x64 上稳定复现，本地却常常是绿的：
+
+> `KillBridge` 调 `Process.Kill(entireProcessTree: true)` 之后**不等进程退出**就
+> `Dispose` 了 `mInput` / `mOutput`。Windows 的共享段是内核对象，由两端句柄共同持有：
+> 桥还活着的那几毫秒里，下一次 `EnsureStarted` 的 `MemoryMappedFile.CreateNew`
+> 会抛 "Cannot create a file when that file already exists."。
+
+修正：杀完 `WaitForExit(2000)` 再放段。**同样应当回灌**。
+
+### 发现 3：win-arm64 上「构建 RID」与「运行 RID」不一致
+
+arm64 runner 上 `NETCoreSdkPortableRuntimeIdentifier` 是 `win-arm64`，但 `dotnet test`
+的 testhost 是 x64，运行时里 `VstBridgeClient.BridgeRid` 算出 `win-x64`，于是找不到桥。
+这不是产品缺陷（正式发布是一套 RID 一整套产物），验证台把桥同时摆到同一 OS 的两个
+架构目录下即可。
+
 
 ## 平台覆盖
 
