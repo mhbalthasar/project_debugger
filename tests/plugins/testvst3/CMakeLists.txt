@@ -74,6 +74,21 @@ foreach(entry IN LISTS variants)
 
   add_library(${target} MODULE testplugin.cpp)
 
+  # 平台入口。`smtg_add_vst3plugin` 会经 smtg_target_add_library_main 替你加上这些文件，
+  # 手写 add_library 就少了它们：
+  #   macOS   —— macmain.cpp 定义 bundleEntry / bundleExit。**VST3 在 macOS 上只能靠
+  #              CFBundle 拿 bundleEntry**（不是 dlsym GetPluginFactory），缺了它原生库
+  #              能编译、能签名、目录结构全对，但自研宿主一律报「插件加载失败」。
+  #   Linux   —— linuxmain.cpp 定义 ModuleEntry / ModuleExit。
+  #   Windows —— dllmain.cpp 定义 InitDll / ExitDll。
+  if(SMTG_MAC)
+    target_sources(${target} PRIVATE "${VST3_SDK}/public.sdk/source/main/macmain.cpp")
+  elseif(SMTG_WIN)
+    target_sources(${target} PRIVATE "${VST3_SDK}/public.sdk/source/main/dllmain.cpp")
+  else()
+    target_sources(${target} PRIVATE "${VST3_SDK}/public.sdk/source/main/linuxmain.cpp")
+  endif()
+
   # 每个平台把包摆到同一个地方；同时把四个配置的目录都钉死 ——
   # 多配置生成器（VS / Xcode）否则会自己加一层 Release/、Debug/。
   set(_tl_out "${bundle}/${TL_CONTENTS_SUBDIR}")

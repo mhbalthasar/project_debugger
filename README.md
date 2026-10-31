@@ -263,9 +263,9 @@ win-x64 / osx 上是绿的：
 修正：`KillBridge` 串行化（`mKillLock`），`KillBridgeCore` 才是原来的方法体。
 **应当回灌 TuneLab 本体**。
 
-### 顺带：macOS 上手写 `add_library` 少了平台框架
+### 顺带：macOS 上手写 `add_library` 少了平台框架与平台入口
 
-osx-arm64 / osx-x64 的插件编译一开始全红：`_CFStringCreateWithFormat`、`_CFUUIDCreate`
+**第一件**：osx-arm64 / osx-x64 的插件编译一开始全红：`_CFStringCreateWithFormat`、`_CFUUIDCreate`
 等一片 `_CF*` 未定义符号。
 
 > `smtg_add_vst3plugin` 会替你把 `-framework CoreFoundation` 接上；本项目为了控制产物位置
@@ -273,6 +273,19 @@ osx-arm64 / osx-x64 的插件编译一开始全红：`_CFStringCreateWithFormat`
 > 处理 UTF-16 字符串，缺了它链接必失败。
 
 修正：`CMakeLists.txt` 里 `if(SMTG_MAC) target_link_libraries(... "-framework CoreFoundation")`。
+
+**第二件（更阴）**：链接过了之后，macOS 上五个测试全报
+“the plugin could not be loaded (bitness or a missing dependency)”，而包结构、架构、签名
+逐项检查都对。
+
+> `smtg_add_vst3plugin` 还会经 `smtg_target_add_library_main` 加上**平台入口源文件**：
+> macOS 的 `public.sdk/source/main/macmain.cpp`（定义 `bundleEntry` / `bundleExit`）、
+> Linux 的 `linuxmain.cpp`、Windows 的 `dllmain.cpp`。
+> Windows / Linux 上宿主是直接 `dlsym` / `GetProcAddress` 取 `GetPluginFactory`，所以缺了
+> 入口文件也能加载 —— 只有 macOS 会挂：VST3 在 macOS 上由 CFBundle 取 `bundleEntry`，
+> 缺了这个符号就是「加载失败」，且报出来的原因和"架构不对"完全一样。
+
+修正：按平台把对应入口文件加进 `target_sources`。
 
 ## 平台覆盖
 
