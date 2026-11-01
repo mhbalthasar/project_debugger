@@ -299,6 +299,19 @@ win-x64 / osx 上是绿的：
 
 修正：按平台把对应入口文件加进 `target_sources`。
 
+### 顺带：帧上限的闸，两端都补上了（产品侧 P5.5）
+
+验证台把隔离从"默认关"推到"默认开"之后，`state` 一律走这条帧（`4 字节长度 + UTF-8 JSON +
+base64`）。两端都拿 `MaxFrameBytes = 16 MB` 判非法，可是**写的那一端原来不拦**：
+
+> 超上限的帧照样写出去，对端读长度时判非法、只读走那 4 个字节就返回 —— 剩下的字节全留在
+> 管道里，之后每一帧都对不上，等于把整座桥废掉（比"这一次失败"糟得多）。
+
+修正（两侧对称）：宿主 `VstBridgeClient.ExchangeAsync` 先量字节数、超了就当场失败并记
+`LastFrameError`；桥 `BridgeSession.Write` 超上限时改回一条合法的 `ErrorMessage`。
+实际天花板 ≈ 12 MB 原始 state（base64 之后），常见 VST3 state 只有几十 KB，所以这条闸平时不响。
+本仓库的两份副本已同步，行为与 TuneLab 本体一致。
+
 ## 平台覆盖
 
 | job | runner | 进程机制 | 真 VST3 | 说明 |
