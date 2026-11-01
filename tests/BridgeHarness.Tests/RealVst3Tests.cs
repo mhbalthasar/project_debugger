@@ -125,7 +125,7 @@ public class RealVst3Tests
         // 断言最后一块 —— 这也顺带证明"改参数之后声音真的变了"，不是只写进缓存。
         for (int block = 0; block < 4; block++)
         {
-            Assert.True(harness.Client.SendProcess(harness.Slot, input, output, 2, frames, false),
+            Assert.True(harness.SendBlock(input, output, frames),
                 "SendProcess failed on block " + block);
         }
 
@@ -158,7 +158,7 @@ public class RealVst3Tests
 
         // 让 0.25 生效，再存一份 chunk。
         for (int block = 0; block < 2; block++)
-            Assert.True(harness.Client.SendProcess(harness.Slot, input, output, 2, frames, false));
+            Assert.True(harness.SendBlock(input, output, frames));
 
         byte[]? saved = harness.Client.GetStateBlocking(harness.Slot);
         Assert.NotNull(saved);
@@ -168,7 +168,7 @@ public class RealVst3Tests
         Assert.True(harness.Client.SetParameterBlocking(harness.Slot, gain.Id, 0.8));
 
         for (int block = 0; block < 2; block++)
-            Assert.True(harness.Client.SendProcess(harness.Slot, input, output, 2, frames, false));
+            Assert.True(harness.SendBlock(input, output, frames));
 
         Assert.Equal(input[0][0] * 0.8f, output[0][0], 5);
 
@@ -176,7 +176,7 @@ public class RealVst3Tests
         Assert.True(harness.Client.SetStateBlocking(harness.Slot, saved!));
 
         for (int block = 0; block < 2; block++)
-            Assert.True(harness.Client.SendProcess(harness.Slot, input, output, 2, frames, false));
+            Assert.True(harness.SendBlock(input, output, frames));
 
         Assert.Equal(input[0][0] * 0.25f, output[0][0], 5);
     }
@@ -211,7 +211,7 @@ public class RealVst3Tests
         Assert.NotNull(reload);
         Assert.True(reload!.Ok, reload.Reason);
 
-        Assert.True(harness.Client.SendProcess(harness.Slot, input, output, 2, frames, false));
+        Assert.True(harness.SendBlock(input, output, frames));
     }
 
     // ── 4. 真插件在 process 里卡死：音频路在一秒内判死并直通，宿主与桥都不陪葬 ──
@@ -245,7 +245,7 @@ public class RealVst3Tests
         Assert.NotNull(reload);
         Assert.True(reload!.Ok, reload.Reason);
 
-        Assert.True(harness.Client.SendProcess(harness.Slot, input, output, 2, frames, false));
+        Assert.True(harness.SendBlock(input, output, frames));
     }
 
     // ── 5. 真插件在加载时崩掉：报失败（不是把宿主带走），桥能重建 ──

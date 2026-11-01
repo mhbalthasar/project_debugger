@@ -312,6 +312,20 @@ base64`）。两端都拿 `MaxFrameBytes = 16 MB` 判非法，可是**写的那�
 实际天花板 ≈ 12 MB 原始 state（base64 之后），常见 VST3 state 只有几十 KB，所以这条闸平时不响。
 本仓库的两份副本已同步，行为与 TuneLab 本体一致。
 
+### 顺带：macOS x64 上偶发"丢一块"，测试改成容忍一次过载
+
+`74a466c` 那一轮 osx-x64 的 `GainIsAppliedThroughTheSharedRing` 与
+`ManyBlocksGoThroughWithoutStalling` 各失败一次，报 `SendProcess failed on block 1`；
+同一提交在 win-x64 / win-arm64 / linux-x64 / linux-arm64 / osx-arm64 上全绿，本机也 20/20。
+
+> 这不是隔离机制的问题，而是**测试口径**问题：`SendProcess` 的实时纪律是"20 ms 内没赶上就
+> 直通"，共享 macOS runner 上一块音频偶尔超过 20 ms 是产品语义允许的结果（那一块直通），
+> 但测试原来把它当零容忍。2000 块的循环尤其脆：一次抖动就整条红。
+
+修正：`Harness.SendBlock` 重试一次再判失败（断言照样逐样本比增益）；2000 块那条改成
+**统计丢块率**（上限 0.5%），仍能一把抓住"音频路径整体不通"或"连续卡死"。
+"必须失败"的用例（杀桥 / 卡死）继续直接用 `Client.SendProcess`。
+
 ## 平台覆盖
 
 | job | runner | 进程机制 | 真 VST3 | 说明 |
